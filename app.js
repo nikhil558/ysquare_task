@@ -2,15 +2,15 @@ const express = require("express");
 const { open } = require("sqlite");
 const sqlite3 = require("sqlite3");
 const path = require("path");
-const { parse, format } = require("date-fns");
-const { validateBody, validateQuery, validateParams } = require("./test");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 app = express();
 app.use(express.json());
 let db = null;
 const initializeDatabaseAndServer = async () => {
   try {
     db = await open({
-      filename: path.join(__dirname, "todoApplication.db"),
+      filename: path.join(__dirname, "new.db"),
       driver: sqlite3.Database,
     });
     app.listen(3000, () => {
@@ -22,121 +22,105 @@ const initializeDatabaseAndServer = async () => {
 };
 initializeDatabaseAndServer();
 
-const toTodoResponseObject = (dbItem) => ({
-  id: dbItem.id,
-  todo: dbItem.todo,
-  priority: dbItem.priority,
-  status: dbItem.status,
-  category: dbItem.category,
-  dueDate: dbItem.due_date,
+const dbObjToResponse = (dbObject) => ({
+  username: dbObject.username,
+  email: dbObject.email,
+  password: dbObject.password,
 });
 
-// function checks validation
+//Resister Api
 
-// get all todos
-
-app.get("/todos/", validateQuery, async (request, response) => {
-  const {
-    status = "",
-    priority = "",
-    search_q = "",
-    category = "",
-  } = request.query;
-  const allTodos = await db.all(`
-    SELECT
-    *
-    FROM
-    todo
-    WHERE 
-    status like "%${status}%" 
-    and priority like "%${priority}%"
-    and todo like "%${search_q}%"
-    and category like "%${category}%";`);
-  response.send(allTodos.map((item) => toTodoResponseObject(item)));
-});
-
-// get todos with id
-app.get("/todos/:todoId/", validateParams, async (request, response) => {
-  const todoId = request.params.todoId;
-  const getTodo = await db.get(`
-    SELECT
-    *
-    FROM
-    todo
-    WHERE id = "${todoId}";
-    `);
-  response.send(toTodoResponseObject(getTodo));
-});
-
-// get todos with same duedate at /agenda/
-app.get("/agenda/", validateQuery, async (request, response) => {
-  const { date } = request.query;
-  const getAgenda = await db.all(`
-    SELECT
-    *
-    FROM
-    todo
-    WHERE due_date = "${format(new Date(date), "yyyy-MM-dd")}";
-    `);
-  if (getAgenda.length === 0) {
-    response.status(400);
-    response.send("Invalid Due Date");
+app.post("/register/", async (request, response) => {
+  const { username, email, password } = request.body;
+  const dbUser = await db.get(
+    `Select * From User where username = "${username}";`
+  );
+  if (dbUser === undefined) {
+    if (password.length >= 6) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await db.run(`
+        INSERT INTO User 
+        (username,email,password )
+        VALUES
+        ("${username}","${email}","${hashedPassword}");
+        `);
+      response.status(200);
+      response.send("User created successfully");
+    } else {
+      response.status(400);
+      response.send("Password is too short");
+    }
   } else {
-    response.send(getAgenda.map((item) => toTodoResponseObject(item)));
-    console.log(getAgenda);
+    response.status(400);
+    response.send("User already exists");
   }
 });
 
-// create a new todo post method api
+//Login Api
 
-app.post("/todos/", validateBody, async (request, response) => {
-  const { id, todo, priority, status, category, dueDate } = request.body;
-  await db.run(`
-    Insert into
-    todo
-    (id, todo, priority, status, category, due_date)
-    values
-    (${id}, "${todo}", "${priority}", "${status}", "${category}", "${dueDate}");
-    `);
-  response.send("Todo Successfully Added");
-});
-
-// update todo with id
-app.put(
-  "/todos/:todoId/",
-  validateParams,
-  validateBody,
-  async (request, response) => {
-    const todoId = request.params.todoId;
-    var key = Object.keys(request.body)[0];
-    if (key === "dueDate") {
-      key = "due_date";
+app.post("/login/", async (request, response) => {
+  const { username, password } = request.body;
+  const dbUser = await db.get(
+    `Select * From User where username = "${username}";`
+  );
+  if (dbUser !== undefined) {
+    const isPasswordMatch = await bcrypt.compare(password, dbUser.password);
+    if (isPasswordMatch) {
+      let jwtToken = jwt.sign(username, "MY_SECRET_KEY");
+      response.send({ jwtToken });
+    } else {
+      response.status(400);
+      response.send("Invalid password");
     }
-    const value = Object.values(request.body)[0];
-    await db.run(`
-      UPDATE
-      todo
-      SET
-      ${key} = "${value}"
-      WHERE
-      id = ${todoId};
-      `);
-    if (key === "due_date") {
-      key = "Due Date";
-    }
-    const resp = `${key} Updated`;
-    response.send(resp[0].toUpperCase() + resp.slice(1));
+  } else {
+    response.status(400);
+    response.send("Invalid user");
   }
-);
-
-// delete todo with id
-app.delete("/todos/:todoId/", validateParams, async (request, response) => {
-  const todoId = request.params.todoId;
-  await db.run(`
-    DELETE FROM todo
-    WHERE id = ${todoId};
-    `);
-  response.send("Todo Deleted");
 });
 
-module.exports = app;
+//Authenticate User
+
+function authenticateToken(request, response, next) {
+  let jwtToken;
+
+  const authorization = request.headers["authorization"];
+  if (authorization !== undefined) {
+    jwtToken = authorization.split(" ")[1];
+  }
+
+  if (jwtToken === undefined) {
+    response.status(401);
+    response.send("Invalid JWT Token");
+  } else {
+    jwt.verify(jwtToken, "MY_SECRET_KEY", async (error, payload) => {
+      if (error) {
+        response.status(401);
+        response.send("Invalid JWT Token");
+      } else {
+        request.username = payload;
+        next();
+      }
+    });
+  }
+}
+
+// GET User Data
+
+app.get("/users/", authenticateToken, async (request, response) => {
+  const query = `
+    SELECT
+    *
+    FROM
+    User;`;
+  const UserObj = await db.all(query);
+  response.send(UserObj.map((each) => dbObjToResponse(each)));
+});
+
+// Delete Users
+
+app.delete("/delete/", async (request, response) => {
+  const query = `
+    DELETE FROM User;`;
+  const deleteUsers = await db.run(query);
+  response.send("Users Removed");
+});

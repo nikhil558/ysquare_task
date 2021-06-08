@@ -1,29 +1,25 @@
-GET http://localhost:3000/todos/?priority=HIGH
-
-###
-GET http://localhost:3000/todos/
-
-###
-GET http://localhost:3000/agenda/?date=2021-02-22
-
-###
-
-POST http://localhost:3000/todos/
+POST http://localhost:3000/register/
 Content-Type: application/json
 
 {
-  "id": 9,
-  "todo": "Finalize event theme",
-  "priority": "LOW",
-  "status": "TO DO",
-  "category": "HOME",
-  "dueDate": "2021-02-22"
+    "username":"akhil",
+    "email":"akhil558@gmail.com",
+    "password":"akhil123"
 }
 
 ###
-PUT http://localhost:3000/todos/6
+POST http://localhost:3000/login/
 Content-Type: application/json
 
 {
-  "todo": "event theme"
+    "username":"suresh",
+    "password":"suresh123"
 }
+
+###
+
+GET http://localhost:3000/users/
+Authorization: BEARER eyJhbGciOiJIUzI1NiJ9.c3VyZXNo.NgxXIrGR8ySH558OwOfSrvV081agL3Kfmx7Fky4Ppuk
+
+###
+DELETE http://localhost:3000/delete/
